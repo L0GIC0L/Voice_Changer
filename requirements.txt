@@ -1,0 +1,4 @@
+sounddevice
+pedalboard
+PyQt6
+numpy
