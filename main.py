@@ -15,6 +15,7 @@ class VoiceChangerApp(QWidget):
             Chorus(rate_hz=1.0, depth=0.25, centre_delay_ms=7.0, feedback=0.0, mix=0.5),
             Bitcrush(bit_depth=8)
         ])
+        self.out_buffer = np.zeros((0, 1), dtype=np.float32)
         self.initUI()
 
     def initUI(self):
@@ -54,8 +55,19 @@ class VoiceChangerApp(QWidget):
             # Simple average downmix
             processed_audio = np.mean(processed_audio, axis=0, keepdims=True)
 
+        # Append to buffer
+        processed = processed_audio.T
+        self.out_buffer = np.concatenate((self.out_buffer, processed), axis=0)
+
         # Write to outdata (samples, channels)
-        outdata[:] = processed_audio.T
+        num_frames = outdata.shape[0]
+        if len(self.out_buffer) >= num_frames:
+            outdata[:] = self.out_buffer[:num_frames]
+            self.out_buffer = self.out_buffer[num_frames:]
+        else:
+            outdata[:len(self.out_buffer)] = self.out_buffer
+            outdata[len(self.out_buffer):] = 0
+            self.out_buffer = np.zeros((0, 1), dtype=np.float32)
 
     def start_processing(self):
         self.status_label.setText("Status: Running")
