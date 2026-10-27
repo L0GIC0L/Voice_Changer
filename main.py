@@ -9,6 +9,7 @@ class VoiceChangerApp(QWidget):
     def __init__(self):
         super().__init__()
         self.stream = None
+        self.output_buffer = np.zeros((0, 1), dtype=np.float32)
         self.board = Pedalboard([
             HighpassFilter(cutoff_frequency_hz=300),
             PitchShift(semitones=2),
@@ -54,8 +55,18 @@ class VoiceChangerApp(QWidget):
             # Simple average downmix
             processed_audio = np.mean(processed_audio, axis=0, keepdims=True)
 
-        # Write to outdata (samples, channels)
-        outdata[:] = processed_audio.T
+        # Append to buffer (shape: samples, channels)
+        self.output_buffer = np.vstack((self.output_buffer, processed_audio.T))
+
+        # Output the exact number of frames required
+        if len(self.output_buffer) >= frames:
+            outdata[:] = self.output_buffer[:frames]
+            self.output_buffer = self.output_buffer[frames:]
+        else:
+            # If not enough data in buffer, pad with zeros
+            outdata[:len(self.output_buffer)] = self.output_buffer
+            outdata[len(self.output_buffer):] = 0
+            self.output_buffer = np.zeros((0, outdata.shape[1]), dtype=np.float32)
 
     def start_processing(self):
         self.status_label.setText("Status: Running")
