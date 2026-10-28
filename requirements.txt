@@ -1,3 +1,5 @@
 PyQt6
 sounddevice
 pedalboard
+aubio
+numpy
