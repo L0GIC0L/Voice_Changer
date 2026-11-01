@@ -1,6 +1,7 @@
 import sys
 import numpy as np
 import sounddevice as sd
+import aubio
 from pedalboard import Pedalboard, HighpassFilter, PitchShift, Chorus, Bitcrush
 from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QLabel
 from PyQt6.QtCore import Qt
@@ -15,6 +16,13 @@ class VoiceChangerApp(QWidget):
             Chorus(rate_hz=1.0, depth=0.25, centre_delay_ms=7.0, feedback=0.0, mix=0.5),
             Bitcrush(bit_depth=8)
         ])
+
+        self.samplerate = 44100
+        self.pitch_o = aubio.pitch("default", 2048, 512, self.samplerate)
+        self.pitch_o.set_unit("Hz")
+        self.pitch_o.set_tolerance(0.8)
+        self.out_buffer = np.array([], dtype=np.float32)
+
         self.initUI()
 
     def initUI(self):
@@ -42,6 +50,20 @@ class VoiceChangerApp(QWidget):
         if status:
             print(status, file=sys.stderr)
 
+        # Extract samples and calculate pitch
+        samples = indata[:, 0].astype(np.float32)
+        pitch_hz = self.pitch_o(samples)[0]
+
+        # Calculate autotune shift + GLaDOS base shift
+        if pitch_hz > 0:
+            midi_note = 69 + 12 * np.log2(pitch_hz / 440.0)
+            nearest_note = np.round(midi_note)
+            shift = (nearest_note - midi_note) + 2.0
+        else:
+            shift = 2.0
+
+        self.board[1].semitones = float(shift)
+
         # Process the input data
         # pedalboard expects shape (channels, samples), sounddevice gives (samples, channels)
         input_audio = indata.T
@@ -54,8 +76,15 @@ class VoiceChangerApp(QWidget):
             # Simple average downmix
             processed_audio = np.mean(processed_audio, axis=0, keepdims=True)
 
-        # Write to outdata (samples, channels)
-        outdata[:] = processed_audio.T
+        # Append to buffer
+        self.out_buffer = np.concatenate((self.out_buffer, processed_audio[0]))
+
+        # Write to outdata
+        if len(self.out_buffer) >= frames:
+            outdata[:, 0] = self.out_buffer[:frames]
+            self.out_buffer = self.out_buffer[frames:]
+        else:
+            outdata[:, 0] = 0
 
     def start_processing(self):
         self.status_label.setText("Status: Running")
@@ -63,7 +92,7 @@ class VoiceChangerApp(QWidget):
         self.stop_btn.setEnabled(True)
 
         try:
-            self.stream = sd.Stream(callback=self.audio_callback, channels=1, samplerate=44100)
+            self.stream = sd.Stream(callback=self.audio_callback, channels=1, samplerate=self.samplerate, blocksize=512)
             self.stream.start()
         except Exception as e:
             self.status_label.setText(f"Error: {e}")
